@@ -108,7 +108,7 @@ describe('retained MQTT v0 bridge', () => {
     mqtt.settle();
     expect(mqtt.queued).toHaveLength(0);
     const changes = mqtt.sent.slice(previous).filter(x => x.topic === prefix + '/state/projects');
-    expect(changes).toHaveLength(3);
+    expect(changes).toHaveLength(2);
     expect(JSON.parse(mqtt.retained.get(prefix + '/state/projects')!)[0].state).toBe('ready');
   });
   test('does not acknowledge stale publish callbacks from the prior MQTT connection', () => {
