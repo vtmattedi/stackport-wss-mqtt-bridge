@@ -1,6 +1,27 @@
 # Deployment design — Stackport and Stackport-Mqtt on one VPS
 
-**Design, not deployment instructions for a finished executable.** The repository does not contain the v0 bridge implementation yet. These steps define what its installer and integration test must satisfy.
+**v0 implemented:** these instructions now target the working Bun/TypeScript bridge and `docker-compose.stackport.yml`. GitHub CI validates the code and builds the Docker image; the actual external TLS connections and dedicated credentials must be verified on the target VPS before production use.
+
+## Deploy through Stackport
+
+In **Stackport → Projects → Add project**, select this GitHub repository and set the Compose path to `docker-compose.stackport.yml`. The Compose file defines one service named **`bridge`** with `restart: unless-stopped`, a read-only filesystem, dropped Linux capabilities, and **no published ports or HTTP domain**. Do not configure healthcheck endpoints; the service listens on no port. Stackport's `com.stackport.health.ignore` label excludes it from its container-health aggregate.
+
+In the project's **Env** editor, create a **root `.env`** (not a secrets file in the repository). Copy keys from [`.env.example`](../.env.example) and provide the Stackport status token, instance ID, and a dedicated MQTT publisher password. For new installs, leave `SP_EXPECTED_SCOPE=all`. The image contains the public NM Root CA file; set `MQTT_CA_FILE=./certs/nm-root-ca.crt`.
+
+Deploy/recreate the project using Stackport's Compose action. Watch the `bridge` container's logs for `bridge.started`, `mqtt.connected`, `stackport.connected`, and `snapshot.synchronized`. The latter indicates all four retained sections received broker QoS1 acknowledgements; `source/availability` is then published as `online`. Without valid credentials, the service retries external connections but cannot reach healthy synchronization.
+
+From a **different, read-only** MQTT client, subscribe to `stackport/<SP_INSTANCE>/#` and check the four section topics plus bridge/source availability. Restart Stackport, bridge, and Mosquitto separately to verify truthful source/bridge availability and eventual replay of retained state. Only one bridge instance may publish to a given topic prefix.
+
+To check the checked-in sources locally:
+
+```sh
+bun ci
+bun run typecheck
+bun test
+bun run build
+docker compose -f docker-compose.stackport.yml config
+docker build -t stackport-wss-mqtt-bridge:v0 .
+```
 
 ## Dependencies already available
 
@@ -99,7 +120,7 @@ Use a non-browser WebSocket client capable of setting a custom `Authorization` h
 
 A status token is only accepted after the endpoint has been enabled. Stackport returns 404 while it is disabled.
 
-## Runbook (after implementation)
+## Production verification runbook
 
 1. Back up both service credentials; do not commit private `.env`.
 2. Enable the Stackport live status stream and create its status-only token.
