@@ -9,7 +9,7 @@ export type WireEvent =
 
 /** Fixed diagnostic codes only. Never include received message fields in errors/logs. */
 export type ProtocolFailureCode =
-  | 'frame_too_large' | 'malformed_json' | 'frame_too_complex'
+  | 'frame_too_large' | 'malformed_json' | 'frame_too_complex' | 'unexpected_frame_type'
   | 'unsupported_version' | 'missing_type'
   | 'hello_expected' | 'hello_instance_mismatch' | 'hello_scope_not_all'
   | 'hello_sections_invalid' | 'snapshot_expected' | 'snapshot_invalid'
