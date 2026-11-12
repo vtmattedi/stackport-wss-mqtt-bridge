@@ -61,6 +61,18 @@ docker build -t stackport-wss-mqtt-bridge:v0 .
 
 All credentials are supplied privately at runtime. Missing/unsafe settings cause immediate startup failure. **No network integration check against the real Stackport or Mosquitto endpoints can succeed until those private credentials and the matching broker ACL are provisioned.**
 
+## Troubleshooting WSS validation
+
+If logs repeatedly show `stackport.connected` followed immediately by
+`stackport.reconnecting` with `reason: bad_protocol`, inspect the new
+`stackport.protocol_rejected` event. It reports only a validation **phase**
+and fixed **code**. Most importantly, check that `SP_INSTANCE` exactly matches
+the instance ID shown in **Stackport → Settings → Live status** and that the
+`SP_STATUS_TOKEN` is **status-only, unscoped (`all`)**.
+
+See [the WSS troubleshooting guide](docs/troubleshooting.md) for the codes and
+safe recovery steps. Do not paste private credentials or full status frames.
+
 ## Files
 
 - [`docs/v0-design.md`](docs/v0-design.md) — contract, algorithm, failure semantics, tests, rollout.
