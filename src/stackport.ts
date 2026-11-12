@@ -34,7 +34,12 @@ export class StackportClient {
     let ws: WebSocket;
     try {
       // Bun-specific WebSocket constructor option; no Origin or query token.
-      ws = new WebSocket(this.config.wsUrl, {
+      // DOM lib declarations only type the browser overload. Bun supports
+      // additional headers at runtime; use a narrow constructor type here.
+      const BunWebSocket = WebSocket as unknown as new (
+        url: string, options: { headers: Record<string, string> }
+      ) => WebSocket;
+      ws = new BunWebSocket(this.config.wsUrl, {
         headers: { Authorization: 'Bearer ' + this.config.statusToken },
       });
     } catch {
