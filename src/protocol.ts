@@ -59,9 +59,10 @@ export class StatusProtocol {
     checkDepth(parsed);
     if (!object(parsed) || parsed.v !== 1 || typeof parsed.type !== 'string') fail();
     if (this.stage === 'hello') {
+      const sections = parsed.sections;
       if (parsed.type !== 'hello' || parsed.instance !== this.instance || parsed.scope !== 'all' ||
-          !Array.isArray(parsed.sections) || parsed.sections.length !== SECTIONS.length ||
-          !SECTIONS.every(section => parsed.sections.includes(section))) fail();
+          !Array.isArray(sections) || sections.length !== SECTIONS.length ||
+          !SECTIONS.every(section => sections.includes(section))) fail();
       this.stage = 'snapshot';
       return { type: 'hello' };
     }
