@@ -1,43 +1,43 @@
 # Implementation plan — v0 Stackport live status → MQTT
 
-Status: **design approved? not yet**. The architecture and topic contract are specified in [docs/v0-design.md](docs/v0-design.md), with deployment assumptions in [docs/deployment.md](docs/deployment.md).
+Status: **v0 implemented and CI verified, but not live-deployed or smoke-tested against the production endpoints**. The architecture and topic contract are in [docs/v0-design.md](docs/v0-design.md), with Stackport setup in [docs/deployment.md](docs/deployment.md).
 
 Do **not** call the bridge deployable until all acceptance tests and the real VPS integration gate pass. No backwards compatibility to a previous bridge implementation is required; this is a new service.
 
 ## Phase 0 — Runtime and transport spike
 
-- [ ] Initialize Bun/TypeScript project with strict TypeScript, pinned package versions, lockfile and a multi-stage, unprivileged production image.
-- [ ] Verify **Bun native WebSocket** can send the required `Authorization` header to a local Stackport `/status/ws` test server, with no `Origin` header and no outgoing data frames.
+- [x] Initialize Bun/TypeScript project with strict TypeScript, exact package versions, committed `bun.lock`, and a non-root production image with frozen production dependencies.
+- [x] Verify **Bun native WebSocket** sends `Authorization` to a local `/status/ws` test server without an `Origin` header or outgoing application frames (`tests/stackport-client.test.ts`).
 - [ ] Verify MQTT.js runs correctly in the selected Bun version: TLS custom CA, `servername`, username/password, QoS1 `publish` callback / PUBACK, Last Will, retained messages, connection timeout, broker restart, offline buffer behavior.
 - [ ] Record compatibility/soak results. If MQTT.js/Bun interop is unreliable, use **Node LTS + ws + MQTT.js**; do not disable TLS verification.
-- [ ] Fail fast on missing/invalid configuration; do not log secrets.
+- [x] Fail fast on missing/invalid configuration, verify bundled CA and HTTPS/MQTTS scheme, and avoid logging secret values.
 
 **Exit:** one reliable WebSocket receive path and one MQTTS publish path, verified independently.
 
 ## Phase 1 — Source protocol
 
-- [ ] Implement `src/config.ts`: env validation, safe instance/topic name, root CA reading, secure URL rules.
-- [ ] Implement `src/stackport/client.ts`: connect with header, hello/snapshot/update/heartbeat parser, protocol `v=1`, monotone `seq`, frame size/depth limits, 90s silence watchdog, backoff/jitter.
-- [ ] Implement `src/domain/state.ts`: authoritative four-section latest snapshot, section replacement (arrays are never merged), freshness/availability.
-- [ ] On reconnect, require a fresh full snapshot, reject premature updates and different instance/scope, avoid default `[]` or `null` values if no snapshot is known.
+- [x] Implement `src/config.ts`: env validation, safe instance/topic name, root CA reading, secure URL rules.
+- [x] Implement `src/stackport.ts` and `src/protocol.ts`: auth header, hello/snapshot/update/heartbeat parser, v1/seq validation, frame/depth limits, silence watchdog, reconnect backoff/jitter.
+- [x] Implement `src/bridge.ts`: authoritative four-section in-memory latest snapshot, section replacement (no patches), independent source freshness/availability.
+- [x] On reconnect, require a fresh full snapshot, reject premature updates and different instance/scope, avoid fabricated empty sections before snapshot.
 - [ ] Tests: schema, authentication denial, instance mismatch, sequence gaps, version mismatch, source stale, disconnect/reconnect and source unavailable.
 
 **Exit:** cleanly maintains a bounded in-memory representation of current Stackport state.
 
 ## Phase 2 — MQTT state sink
 
-- [ ] Implement `src/mqtt/client.ts`: existing Stackport-Mqtt broker TLS/CA/SNI, dedicated client, stable unique client ID, keepalive, QoS1 retained Will on bridge availability.
-- [ ] Implement `src/mqtt/topics.ts`: fixed topic prefix and six whitelisted topic names from the contract; **no subscribe** and **no per-project retained topics**.
-- [ ] Implement `src/bridge.ts`: serialize/coalesce latest section publications, track acknowledged values, bounded memory when offline, republish all four sections after reconnect and new source snapshot.
-- [ ] Publish truthful source availability (`connecting/online/stale/offline`); never transform a source disconnect into a project state `down`.
-- [ ] Exactly one live bridge instance may write a given prefix; reject wrong `SP_INSTANCE` on hello.
+- [x] Implement the MQTT.js transport in `src/index.ts`: MQTTS/CA/SNI, service credentials, stable client ID, keepalive, QoS1 retained Last Will.
+- [x] Implement six whitelisted MQTT topics in `src/bridge.ts`, no subscribe and no per-project retained topics.
+- [x] Implement `src/bridge.ts`: serialize/coalesce per-section state, track QoS1 ACKs, keep bounded latest state while offline, and replay after reconnect/snapshot.
+- [x] Publish source availability (`connecting/online/stale/offline`); never manufacture project `down` on source failure.
+- [x] Reject unexpected `SP_INSTANCE` on hello; deployment documents **one live bridge writer** per prefix (not broker-enforced).
 - [ ] Tests: full snapshot, single-section update, unchanged value, empty arrays, MQTT reconnect/full resync, LWT, QoS1 backpressure, order and duplicate events.
 
 **Exit:** consumers subscribing to retained topics reconstruct the latest complete state after arbitrary reconnects.
 
 ## Phase 3 — Deployment and hardening
 
-- [ ] Provide a **standalone Stackport-managed container** with no ingress ports, non-root user, read-only filesystem, no Docker socket, caps dropped; private project `.env` outside git.
+- [x] Provide `docker-compose.stackport.yml` and Dockerfile: standalone non-root managed container, no ingress, read-only filesystem, no Docker socket, dropped capabilities, private `.env`.
 - [ ] Verify **external `wss://sp.mattediworks.com/status/ws`** from the actual bridge container, validating public TLS and header-only `status` authorization through the real Nginx route. No loopback/plaintext fallback in v0.
 - [ ] Verify **external `mqtts://mqtt.mattediworks.com:8883`** from the actual bridge container, validating the NM Root CA, certificate chain and SAN/SNI `mqtt.mattediworks.com`.
 - [ ] Create a dedicated `stackport-bridge` broker user and publish-only Dynamic Security ACL; show denied out-of-scope publish attempts.
@@ -55,7 +55,7 @@ Do **not** call the bridge deployable until all acceptance tests and the real VP
 - Automatic token creation or MQTT broker administration; those remain controlled by Stackport and Stackport-Mqtt.
 - Integration with MW Notification (independent lifecycle).
 
-## Manual approval points before implementation
+## Deployment release gates
 
 - The v0 placement is already chosen: **ordinary Stackport-managed outbound-only container with external WSS/MQTTS**. Confirm the real VPS public hostname/hairpin route works, rather than reopening topology selection.
 - Confirm v0 `all`-scope, four-section retained state topics, and omission of event history.
