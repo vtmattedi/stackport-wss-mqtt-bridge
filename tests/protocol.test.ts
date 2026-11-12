@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { StatusProtocol, SECTIONS } from '../src/protocol';
+import { ProtocolError, StatusProtocol, SECTIONS, type ProtocolFailureCode } from '../src/protocol';
 
 const hello = { type: 'hello', v: 1, instance: 'sp-test', scope: 'all', sections: SECTIONS };
 const snapshot = {
@@ -7,6 +7,18 @@ const snapshot = {
   data: { host: null, projects: [{ id: 7, name: 'Demo', state: 'ready' }], actions: [], alerts: [] },
 };
 function feed(p: StatusProtocol, data: unknown) { return p.accept(JSON.stringify(data)); }
+function expectCode(work: () => unknown, expected: ProtocolFailureCode) {
+  try {
+    work();
+    throw new Error('expected protocol rejection');
+  } catch (error) {
+    expect(error).toBeInstanceOf(ProtocolError);
+    if (!(error instanceof ProtocolError)) throw error;
+    expect(error.message).toBe('bad_protocol');
+    expect(error.code).toBe(expected);
+  }
+}
+
 describe('Stackport read-only WSS protocol', () => {
   test('hello + full snapshot + complete-section update + heartbeat', () => {
     const p = new StatusProtocol('sp-test');
@@ -38,6 +50,37 @@ describe('Stackport read-only WSS protocol', () => {
     for (let i = 0; i < 22; i++) nested = { value: nested };
     expect(() => feed(p, nested)).toThrow('bad_protocol');
   });
+  test('reports safe, fixed hello diagnostics for common deployment mistakes', () => {
+    const wrongInstance = new StatusProtocol('sp-from-env');
+    expectCode(() => feed(wrongInstance, { ...hello, instance: 'sp-from-server' }), 'hello_instance_mismatch');
+    expect(wrongInstance.phase).toBe('hello');
+
+    const scoped = new StatusProtocol('sp-test');
+    expectCode(() => feed(scoped, { ...hello, scope: 'group' }), 'hello_scope_not_all');
+    expectCode(() => feed(new StatusProtocol('sp-test'), { ...hello, sections: ['projects'] }), 'hello_sections_invalid');
+    expectCode(() => feed(new StatusProtocol('sp-test'), { ...hello, v: 2 }), 'unsupported_version');
+    expectCode(() => feed(new StatusProtocol('sp-test'), snapshot), 'hello_expected');
+  });
+
+  test('reports section-level failure without printing upstream content', () => {
+    const p = new StatusProtocol('sp-test');
+    feed(p, hello);
+    expect(p.phase).toBe('snapshot');
+    expectCode(() => feed(p, {
+      ...snapshot, data: { ...snapshot.data, projects: [{ id: '7', name: 'private-name', state: 'ready' }] },
+    }), 'invalid_projects');
+    expectCode(() => feed(p, { ...snapshot, data: { host: null, projects: [], actions: [] } }), 'snapshot_missing_section');
+    expectCode(() => feed(p, { ...snapshot, seq: 9 }), 'sequence_invalid');
+    // Failure does not advance the expected sequence or the phase.
+    expect(p.phase).toBe('snapshot');
+    expect(feed(p, snapshot).type).toBe('snapshot');
+    expect(p.phase).toBe('live');
+    expectCode(() => feed(p, {
+      type: 'update', v: 1, seq: 2, at: snapshot.at,
+      section: 'actions', data: [{ id: 'action-123', projectId: 'wrong' }],
+    }), 'invalid_actions');
+  });
+
   test('rejects snapshot missing required sections and invalid numeric project IDs', () => {
     const p = new StatusProtocol('sp-test');
     feed(p, hello);
