@@ -28,8 +28,7 @@ export class Bridge {
   private state: SourceHealth = 'connecting';
   private reason: Reason = null;
   private observedAt = new Date().toISOString();
-  private sourceAt: string | null = null;
-  private dataAgeS: number | null = null;
+  private snapshotAt: string | null = null;
 
   constructor(private readonly config: Pick<Config, 'topicBase'>, private readonly publisher: PublishClient) {}
   topic(suffix: string): string { return this.config.topicBase + '/' + suffix; }
@@ -78,31 +77,30 @@ export class Bridge {
   }
 
   onFrame(event: WireEvent): void {
-    if (event.type === 'hello') return;
-    this.sourceAt = event.at;
+    // The WebSocket client uses heartbeats for freshness checks. No MQTT
+    // status publish is needed for timestamp-only heartbeat changes.
+    if (event.type === 'hello' || event.type === 'heartbeat') return;
     if (event.type === 'snapshot') {
+      this.snapshotAt = event.at;
       for (const section of SECTIONS) this.values.set(section, JSON.stringify(event.data[section]));
-      // New source connection must overwrite all retained sections, including [].
+      // New source connection must reconcile all sections, including [].
       this.fresh = true;
       this.fullSync = true;
       for (const section of SECTIONS) this.acknowledged.delete(this.topic('state/' + section));
-      this.dataAgeS = 0;
       this.setHealth('online', null);
       this.kick();
-    } else if (event.type === 'update') {
-      if (!this.fresh) return;
-      this.values.set(event.section, JSON.stringify(event.data));
-      this.kick();
-    } else {
-      this.dataAgeS = event.dataAgeS;
-      this.observedAt = new Date().toISOString();
-      this.kick();
+      return;
     }
+    if (!this.fresh) return;
+    this.values.set(event.section, JSON.stringify(event.data));
+    this.kick();
   }
-  private sourceMessage(state: SourceHealth): string {
+  private statusMessage(state: SourceHealth): string {
     return JSON.stringify({
-      state, observedAt: this.observedAt, sourceAt: this.sourceAt,
-      dataAgeS: this.dataAgeS, reason: state === 'connecting' ? null : this.reason,
+      state,
+      reason: state === 'connecting' ? null : this.reason,
+      observedAt: this.observedAt,
+      snapshotAt: this.snapshotAt,
     });
   }
   private allSectionsAcknowledged(): boolean {
@@ -113,19 +111,21 @@ export class Bridge {
   }
 
   private next(): { topic: string; payload: string } | null {
-    const bridgeTopic = this.topic('bridge/availability');
-    const bridgeOnline = '{"state":"online"}';
-    if (this.acknowledged.get(bridgeTopic) !== bridgeOnline) {
-      return { topic: bridgeTopic, payload: bridgeOnline };
+    // QoS1 retained tombstones remove the two old availability topics.
+    // Repeat on MQTT reconnection; no durable migration state is needed.
+    for (const suffix of ['bridge/availability', 'source/availability']) {
+      const topic = this.topic(suffix);
+      if (this.acknowledged.get(topic) !== '') return { topic, payload: '' };
     }
-    const sourceTopic = this.topic('source/availability');
+
+    const statusTopic = this.topic('status');
     const initialSync = this.fresh && this.fullSync && !this.allSectionsAcknowledged();
     const provisionalState = initialSync && this.state === 'online' ? 'connecting' : this.state;
-    const provisionalPayload = this.sourceMessage(provisionalState);
+    const provisionalPayload = this.statusMessage(provisionalState);
 
-    // Immediately mark missing/stale source as such; don't synthesize project failures.
-    if (provisionalState !== 'online' && this.acknowledged.get(sourceTopic) !== provisionalPayload) {
-      return { topic: sourceTopic, payload: provisionalPayload };
+    // Source health is reported online only after the four state PUBACKs.
+    if (provisionalState !== 'online' && this.acknowledged.get(statusTopic) !== provisionalPayload) {
+      return { topic: statusTopic, payload: provisionalPayload };
     }
     if (this.fresh) {
       for (const section of SECTIONS) {
@@ -140,9 +140,9 @@ export class Bridge {
       this.fullSync = false;
       log('snapshot.synchronized');
     }
-    const actualPayload = this.sourceMessage(this.state);
-    if (this.acknowledged.get(sourceTopic) !== actualPayload) {
-      return { topic: sourceTopic, payload: actualPayload };
+    const actualPayload = this.statusMessage(this.state);
+    if (this.acknowledged.get(statusTopic) !== actualPayload) {
+      return { topic: statusTopic, payload: actualPayload };
     }
     return null;
   }

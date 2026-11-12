@@ -66,10 +66,10 @@ describe('native Bun WebSocket transport', () => {
       ]);
       for (const section of SECTIONS) expect(published.has('stackport/sp-test/state/' + section)).toBe(true);
       for (let i = 0; i < 20; i++) {
-        if (JSON.parse(published.get('stackport/sp-test/source/availability') ?? '{}').state === 'online') break;
+        if (JSON.parse(published.get('stackport/sp-test/status') ?? '{}').state === 'online') break;
         await Bun.sleep(20);
       }
-      expect(JSON.parse(published.get('stackport/sp-test/source/availability')!).state).toBe('online');
+      expect(JSON.parse(published.get('stackport/sp-test/status')!).state).toBe('online');
     } finally {
       source.stop();
       bridge.stop();
