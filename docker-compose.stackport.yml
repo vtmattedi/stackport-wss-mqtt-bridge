@@ -1,0 +1,26 @@
+# Stackport project Compose: select this file when creating the project.
+# Stackport > Project > Env: create .env from .env.example, add private credentials.
+# Does NOT expose ports, require host networking or join the Stackport management network.
+services:
+  bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: 192m
+    labels:
+      com.stackport.health.ignore: "true"
