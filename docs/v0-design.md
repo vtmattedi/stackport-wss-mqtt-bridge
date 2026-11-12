@@ -13,12 +13,11 @@ V0 does not expose an HTTP server, commands, a UI, a database, or a Docker socke
 ## Architecture
 
 ```text
-Stackport 1.3.11+                         Stackport-Mqtt / Mosquitto
-  /status/ws (raw WebSocket)                       MQTTS:8883
+Stackport 1.3.11+ (public WSS)           Stackport-Mqtt / Mosquitto
+  wss://sp.mattediworks.com/status/ws      mqtts://mqtt.mattediworks.com:8883
   Authorization: Bearer spk_...                   dedicated service client
             |                                              ^
-            | ws://127.0.0.1:3000 (host only)              | TLS CA + verify_hostname
-            | OR wss://<Stackport domain>                  |
+            | wss://sp.mattediworks.com/status/ws         | TLS CA + verify_hostname
             v                                              |
   ┌─────────────────────────────────────────────────────────────┐
   │                  Bun / TypeScript bridge                    │
@@ -97,9 +96,9 @@ Only the bridge may write this namespace. A separate read-only role for subscrib
 ### Startup
 
 1. Validate `.env` and certificate; reject all query strings in the Stackport URL; require `SP_INSTANCE` to be a single safe topic segment, `mqtts:` scheme, valid TLS hostname, and nonempty service credentials.
-2. Connect MQTT with a stable unique `clientId`, `keepalive` 30 seconds, QoS1 retained Last Will `bridge/availability={"state":"offline"}`, and TLS verification using the NM Root CA and the configured certificate name.
+2. Connect **`mqtts://mqtt.mattediworks.com:8883`** with a stable unique `clientId`, `keepalive` 30 seconds, QoS1 retained Last Will `bridge/availability={"state":"offline"}`, and TLS verification using the NM Root CA and the configured certificate name.
 3. On MQTT CONNACK, publish `bridge/availability=online`, and `source/availability=connecting` or `offline` according to actual source state.
-4. Open Stackport WebSocket with only `Authorization: Bearer <SP_STATUS_TOKEN>`, using its chosen secure route; expect `hello` and `snapshot`.
+4. Open **`wss://sp.mattediworks.com/status/ws`** with only `Authorization: Bearer <SP_STATUS_TOKEN>` and valid public TLS; expect `hello` and `snapshot`.
 5. **On every new snapshot**, set a fresh local four-section state, mark all four topics dirty and publish them with QoS1; publish `source/availability=online` **only after all four current section publications are acknowledged**.
 
 ### Updates
@@ -135,7 +134,7 @@ Only the bridge may write this namespace. A separate read-only role for subscrib
 - No inbound ports, no Docker socket, no root privileges, no privileged container, no shell/deploy privileges.
 - Sanitize logs: never print tokens, passwords, full connection URL userinfo, provider payload, or raw WebSocket errors that may contain headers. Structured telemetry: connection state, last source frame, source age, publish success/failure counts, retry backoff.
 - Maximum inbound frame size / JSON depth and outgoing MQTT payload size must be bounded with explicit caps. Failure to parse closes/reconnects instead of publishing corrupt state.
-- If direct `ws://127.0.0.1:3000` cannot be reached without crossing network isolation, use the **verified** `wss://` route; **do not** weaken Stackport's TLS/loopback policy.
+- v0 always uses externally verified **`wss://sp.mattediworks.com/status/ws`** and **`mqtts://mqtt.mattediworks.com:8883`**. It does not require an internal container route or host loopback. **Do not** weaken Stackport's TLS/loopback policy.
 
 ## Acceptance tests (implementation phase)
 
@@ -145,7 +144,7 @@ Only the bridge may write this namespace. A separate read-only role for subscrib
 4. **Failures**: source disconnect/stale/timeout does not mark projects down; broker disconnect triggers bridge LWT and recovery republishes latest complete state with no backlog.
 5. **Security**: invalid status token cannot connect; no `Origin` or token query string; MQTT rejects untrusted TLS, wrong servername, wrong password and forbidden topic; no client listening ports.
 6. **Convergence**: restart bridge, MQTT, or Stackport independently; newly subscribed MQTT clients see the latest retained section arrays plus truthful availability.
-7. **Real deployment**: verify actual Stackport **loopback** or Nginx/WSS route, MQTT TCP proxy and NM Root CA chain. See [ENG-66](https://linear.app/mattediworks/issue/ENG-66/p1-validate-secure-internal-route-for-stackport-live-ws-mqtt-bridge).
+7. **Real deployment**: verify Stackport's external **Nginx/WSS** route, external broker MQTTS TCP proxy and NM Root CA chain from the bridge container. See [ENG-66](https://linear.app/mattediworks/issue/ENG-66/p1-validate-secure-internal-route-for-stackport-live-ws-mqtt-bridge).
 
 No claim of v0 production-readiness until these tests pass against a real bridge and broker.
 
