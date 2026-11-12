@@ -19,7 +19,7 @@ Keep Stackport's current operational state available to MQTT clients through the
 - **Bun + TypeScript**, using the **Bun native WebSocket client** with an Authorization header to `wss://sp.mattediworks.com/status/ws`.
 - **MQTT.js** over authenticated **`mqtts://mqtt.mattediworks.com:8883`**. No separate broker, HTTP server, Socket.IO client, database, or incoming port.
 - Two upstream service credentials, configured in a private `.env`: `SP_STATUS_TOKEN` (Stackport `status` scope) and `MQTT_USERNAME`/`MQTT_PASSWORD` (dedicated Mosquitto Dynamic Security client).
-- TLS verification for MQTT against [`certs/nm-root-ca.crt`](certs/nm-root-ca.crt). **Never use `rejectUnauthorized: false`.** The supplied NM Root CA is public trust material, **not** an application secret; its fingerprint is recorded in the security document.
+- TLS verification for MQTT against [`certs/nm-root-ca.crt`](certs/nm-root-ca.crt). **Never use `rejectUnauthorized: false`.** The supplied NM Root CA is public trust material, **not** an application secret; its fingerprint is recorded in the deployment guide.
 - MQTT QoS 1 and retained publications; broker Last Will for bridge process availability.
 - **No subscriptions** and **no per-project retained topics** in v0: each section is one retained JSON topic. This avoids stale per-project topics and the need for a durable deleted-ID registry.
 
@@ -41,7 +41,7 @@ All JSON is UTF-8. State messages are published with `qos: 1`, `retain: true`. A
 ## Files
 
 - [`docs/v0-design.md`](docs/v0-design.md) — contract, algorithm, failure semantics, tests, rollout.
-- [`docs/deployment.md`](docs/deployment.md) — internal/local networking and alternatives, broker ACL, env setup.
+- [`docs/deployment.md`](docs/deployment.md) — selected external WSS/MQTTS topology, broker ACL, CA verification and env setup.
 - [`certs/nm-root-ca.crt`](certs/nm-root-ca.crt) — public broker CA supplied for this deployment.
 - [`.env.example`](.env.example) — example configuration, **no credentials**.
 
