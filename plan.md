@@ -37,13 +37,13 @@ Do **not** call the bridge deployable until all acceptance tests and the real VP
 
 ## Phase 3 — Deployment and hardening
 
-- [ ] Provide a **systemd unit or a host-side container** with no ingress ports, non-root user, read-only filesystem, no Docker socket, caps dropped; private `.env` outside git.
-- [ ] Verify host-local Stackport `ws://127.0.0.1:3000/status/ws` actually works from the selected runtime; if not, use proper `wss://` via trusted proxy. Never weaken Stackport's transport rule.
-- [ ] Verify Stackport-Mqtt local MQTTS listener through TCP proxy at `127.0.0.1:8883`, valid broker chain and `servername=mqtt.mattediworks.com`.
+- [ ] Provide a **standalone Stackport-managed container** with no ingress ports, non-root user, read-only filesystem, no Docker socket, caps dropped; private project `.env` outside git.
+- [ ] Verify **external `wss://sp.mattediworks.com/status/ws`** from the actual bridge container, validating public TLS and header-only `status` authorization through the real Nginx route. No loopback/plaintext fallback in v0.
+- [ ] Verify **external `mqtts://mqtt.mattediworks.com:8883`** from the actual bridge container, validating the NM Root CA, certificate chain and SAN/SNI `mqtt.mattediworks.com`.
 - [ ] Create a dedicated `stackport-bridge` broker user and publish-only Dynamic Security ACL; show denied out-of-scope publish attempts.
 - [ ] Validate offline/online/stale transitions during independent Stackport, bridge and broker restarts, including retained topic convergence.
 - [ ] Confirm that no token, password, header, private key, source payload or privileged URL is written to logs.
-- [ ] Record real-VPS integration evidence and update [ENG-66](https://linear.app/mattediworks/issue/ENG-66/p1-validate-secure-internal-route-for-stackport-live-ws-mqtt-bridge).
+- [ ] Record real-VPS external-route integration evidence; retain internal-only network work under [ENG-66](https://linear.app/mattediworks/issue/ENG-66/p1-validate-secure-internal-route-for-stackport-live-ws-mqtt-bridge).
 - [ ] Confirm the source group-scoping defect in [ENG-65](https://linear.app/mattediworks/issue/ENG-65/p1-reconcile-scoped-live-status-sections-when-a-project-changes-groups) is fixed before offering group-restricted bridge subscriptions.
 
 **Exit:** deployable v0, verified against real Stackport and Stackport-Mqtt, no unproven Internet-free assumptions.
@@ -57,6 +57,6 @@ Do **not** call the bridge deployable until all acceptance tests and the real VP
 
 ## Manual approval points before implementation
 
-- Confirm the target process placement: **host-side systemd** (default) vs **host-network container** vs **managed container with public WSS route**.
+- The v0 placement is already chosen: **ordinary Stackport-managed outbound-only container with external WSS/MQTTS**. Confirm the real VPS public hostname/hairpin route works, rather than reopening topology selection.
 - Confirm v0 `all`-scope, four-section retained state topics, and omission of event history.
 - Confirm MQTT subscriber clients are provisioned separately and will handle **both** availability topics.
