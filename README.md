@@ -2,7 +2,7 @@
 
 A small, **receive-only Stackport live-status → MQTT state bridge**.
 
-**Stage:** v0 architecture/implementation plan. This repository deliberately starts with the contract and deployment decisions; it is **not yet a runnable service**.
+**Stage:** v0 implementation available in the feature branch. Automated tests and Docker build must pass; **production WSS and MQTTS connections have not been tested with your private credentials**.
 
 ## Purpose
 
@@ -38,12 +38,37 @@ Given a fixed `SP_INSTANCE=sp-...` (from Stackport's Settings → Live status):
 
 All JSON is UTF-8. State messages are published with `qos: 1`, `retain: true`. An empty array is **`[]`**, not an MQTT retained-message deletion. MQTT clients may receive duplicates: process state idempotently.
 
+## Deploy the runnable v0 in Stackport
+
+1. Create a **new Stackport managed project** using this repository. Set **Compose file** to `docker-compose.stackport.yml`. Do not add an HTTP domain, TCP exposure or published port.
+2. Use **Project → Env** to create the project's **root `.env`** from [`.env.example`](.env.example). Provide `SP_INSTANCE` (Stackport Settings → Live status), `SP_STATUS_TOKEN` (dedicated **status-only, unscoped** key), and a dedicated `MQTT_USERNAME`/`MQTT_PASSWORD` with publish-only ACL.
+3. Confirm the fixed external URLs `wss://sp.mattediworks.com/status/ws` and `mqtts://mqtt.mattediworks.com:8883`. The **public** NM Root CA is baked into the image at `./certs/nm-root-ca.crt` (never put the private CA key into Stackport).
+4. Run **Compose up/redeploy**. The single bridge container has no inbound ports. In its logs look for `bridge.started`, `mqtt.connected`, `stackport.connected`, and `snapshot.synchronized` (after all retained QoS1 publishes complete).
+5. With a separately authorized **read-only MQTT client**, subscribe to `stackport/<SP_INSTANCE>/#`. Verify two availability topics and the four complete sections. Restart Stackport and the broker separately to test recovery.
+
+**Do not use the MQTT broker's `mqtt-admin` or broad `nmnw` login.** Create a dedicated Dynamic Security role with only `publishClientSend` permissions under the bridge prefix. The bridge does not need subscriptions.
+
+For development and CI:
+
+```sh
+bun ci
+bun run typecheck
+bun test
+bun run build
+docker compose -f docker-compose.stackport.yml config
+docker build -t stackport-wss-mqtt-bridge:v0 .
+```
+
+All credentials are supplied privately at runtime. Missing/unsafe settings cause immediate startup failure. **No network integration check against the real Stackport or Mosquitto endpoints can succeed until those private credentials and the matching broker ACL are provisioned.**
+
 ## Files
 
 - [`docs/v0-design.md`](docs/v0-design.md) — contract, algorithm, failure semantics, tests, rollout.
 - [`docs/deployment.md`](docs/deployment.md) — selected external WSS/MQTTS topology, broker ACL, CA verification and env setup.
 - [`certs/nm-root-ca.crt`](certs/nm-root-ca.crt) — public broker CA supplied for this deployment.
 - [`.env.example`](.env.example) — example configuration, **no credentials**.
+- [`docker-compose.stackport.yml`](docker-compose.stackport.yml) and [`Dockerfile`](Dockerfile) — runnable managed container.
+- [`src/`](src/) and [`tests/`](tests/) — bridge runtime and automated tests.
 
 ## Key dependencies / limits
 
