@@ -79,7 +79,7 @@ Inside the container, resolve `MQTT_CA_FILE` relative to its working directory (
 From the bridge runtime/network, once the TCP exposure is live:
 
 ```bash
-openssl s_client -brief -connect 127.0.0.1:8883 \
+openssl s_client -brief -connect mqtt.mattediworks.com:8883 \
   -servername mqtt.mattediworks.com \
   -verify_hostname mqtt.mattediworks.com \
   -CAfile certs/nm-root-ca.crt < /dev/null
