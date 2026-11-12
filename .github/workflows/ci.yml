@@ -12,12 +12,7 @@ jobs:
         with:
           bun-version: 1.4.4
       - name: Install dependencies
-        run: bun install
-      - name: Export dependency lockfile for version pinning
-        run: |
-          echo 'BEGIN_BUN_LOCK'
-          cat bun.lock
-          echo 'END_BUN_LOCK'
+        run: bun ci
       - name: Typecheck
         run: bun run typecheck
       - name: Unit tests
