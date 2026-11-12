@@ -1,5 +1,5 @@
 import type { Config } from './config';
-import { SECTIONS, type Section, type Snapshot, type WireEvent } from './protocol';
+import { SECTIONS, type Section, type WireEvent } from './protocol';
 import { log } from './log';
 
 export type SourceHealth = 'connecting' | 'online' | 'stale' | 'offline';
