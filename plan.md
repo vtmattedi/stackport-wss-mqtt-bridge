@@ -27,7 +27,7 @@ Do **not** call the bridge deployable until all acceptance tests and the real VP
 ## Phase 2 — MQTT state sink
 
 - [x] Implement the MQTT.js transport in `src/index.ts`: MQTTS/CA/SNI, service credentials, stable client ID, keepalive, QoS1 retained Last Will.
-- [x] Implement six whitelisted MQTT topics in `src/bridge.ts`, no subscribe and no per-project retained topics.
+- [x] Implement five active MQTT topics plus two legacy retained tombstones in `src/bridge.ts`, no subscribe and no per-project retained topics.
 - [x] Implement `src/bridge.ts`: serialize/coalesce per-section state, track QoS1 ACKs, keep bounded latest state while offline, and replay after reconnect/snapshot.
 - [x] Publish source availability (`connecting/online/stale/offline`); never manufacture project `down` on source failure.
 - [x] Reject unexpected `SP_INSTANCE` on hello; deployment documents **one live bridge writer** per prefix (not broker-enforced).
@@ -59,4 +59,4 @@ Do **not** call the bridge deployable until all acceptance tests and the real VP
 
 - The v0 placement is already chosen: **ordinary Stackport-managed outbound-only container with external WSS/MQTTS**. Confirm the real VPS public hostname/hairpin route works, rather than reopening topology selection.
 - Confirm v0 `all`-scope, four-section retained state topics, and omission of event history.
-- Confirm MQTT subscriber clients are provisioned separately and will handle **both** availability topics.
+- Confirm MQTT subscriber clients are provisioned separately and use unified `status`, and that the two old availability topics are no longer retained after deployment.

@@ -20,7 +20,7 @@ Keep Stackport's current operational state available to MQTT clients through the
 - **MQTT.js** over authenticated **`mqtts://mqtt.mattediworks.com:8883`**. No separate broker, HTTP server, Socket.IO client, database, or incoming port.
 - Two upstream service credentials, configured in a private `.env`: `SP_STATUS_TOKEN` (Stackport `status` scope) and `MQTT_USERNAME`/`MQTT_PASSWORD` (dedicated Mosquitto Dynamic Security client).
 - TLS verification for MQTT against [`certs/nm-root-ca.crt`](certs/nm-root-ca.crt). **Never use `rejectUnauthorized: false`.** The supplied NM Root CA is public trust material, **not** an application secret; its fingerprint is recorded in the deployment guide.
-- MQTT QoS 1 and retained publications; broker Last Will for bridge process availability.
+- MQTT QoS 1 and retained publications; a unified `status` topic with broker Last Will.
 - **No subscriptions** and **no per-project retained topics** in v0: each section is one retained JSON topic. This avoids stale per-project topics and the need for a durable deleted-ID registry.
 
 ## MQTT topics
@@ -29,12 +29,15 @@ Given a fixed `SP_INSTANCE=sp-...` (from Stackport's Settings → Live status):
 
 | Topic | Retained payload |
 | --- | --- |
-| `stackport/<instance>/bridge/availability` | `{"state":"online"}` or LWT `{"state":"offline"}` |
-| `stackport/<instance>/source/availability` | JSON state: `connecting`, `online`, `stale`, or `offline`, plus timestamps/data age |
+| `stackport/<instance>/status` | JSON health: `connecting`, `online`, `stale`, or `offline`; LWT marks bridge disconnection |
 | `stackport/<instance>/state/host` | Entire Stackport `host` section (object or JSON `null`) |
 | `stackport/<instance>/state/projects` | Entire `projects` array, retaining Stackport's stable integer project `id` |
 | `stackport/<instance>/state/actions` | Entire `actions` array |
 | `stackport/<instance>/state/alerts` | Entire `alerts` array (conditions, **not** notification history) |
+
+The retained `status` payload has `state`, `reason`, `observedAt` (health transition timestamp), and `snapshotAt` (timestamp of the last complete Stackport snapshot). A broker Last Will or graceful exit writes `{"state":"offline","reason":"bridge_disconnected"}`. Source failure writes `{"state":"offline","reason":"socket_closed"}` (or another bounded source failure reason). Heartbeats do not republish status solely to update timestamps. Treat section values as **last-known** unless `status.state === "online"`.
+
+**Breaking change:** migrate MQTT subscribers to `status` before upgrading. On **every** MQTT connection, the bridge deletes the old retained `bridge/availability` and `source/availability` with QoS 1 zero-byte messages. Do not run old and new bridges for the same instance simultaneously.
 
 All JSON is UTF-8. State messages are published with `qos: 1`, `retain: true`. An empty array is **`[]`**, not an MQTT retained-message deletion. MQTT clients may receive duplicates: process state idempotently.
 
@@ -44,7 +47,7 @@ All JSON is UTF-8. State messages are published with `qos: 1`, `retain: true`. A
 2. Use **Project → Env** to create the project's **root `.env`** from [`.env.example`](.env.example). Provide `SP_INSTANCE` (Stackport Settings → Live status), `SP_STATUS_TOKEN` (dedicated **status-only, unscoped** key), and a dedicated `MQTT_USERNAME`/`MQTT_PASSWORD` with publish-only ACL.
 3. Confirm the fixed external URLs `wss://sp.mattediworks.com/status/ws` and `mqtts://mqtt.mattediworks.com:8883`. The **public** NM Root CA is baked into the image at `./certs/nm-root-ca.crt` (never put the private CA key into Stackport).
 4. Run **Compose up/redeploy**. The single bridge container has no inbound ports. In its logs look for `bridge.started`, `mqtt.connected`, `stackport.connected`, and `snapshot.synchronized` (after all retained QoS1 publishes complete).
-5. With a separately authorized **read-only MQTT client**, subscribe to `stackport/<SP_INSTANCE>/#`. Verify two availability topics and the four complete sections. Restart Stackport and the broker separately to test recovery.
+5. With a separately authorized **read-only MQTT client**, subscribe to `stackport/<SP_INSTANCE>/#`. Verify the unified `status` topic, four complete sections, and the absence of retained legacy availability topics. Restart Stackport and the broker separately to test recovery.
 
 **Do not use the MQTT broker's `mqtt-admin` or broad `nmnw` login.** Create a dedicated Dynamic Security role with only `publishClientSend` permissions under the bridge prefix. The bridge does not need subscriptions.
 

@@ -39,7 +39,7 @@ const frame = { type: 'snapshot' as const, at: time, data: snapshot };
 function setup() {
   const mqtt = new FakeMqtt();
   mqtt.retained.set(prefix + '/bridge/availability', '{"state":"online"}');
-  mqtt.retained.set(prefix + '/status', '{"state":"online"}');
+  mqtt.retained.set(prefix + '/source/availability', '{"state":"online"}');
   const bridge = new Bridge({ topicBase: prefix }, mqtt);
   bridge.onMqttConnect();
   mqtt.settle();
@@ -68,6 +68,28 @@ describe('retained MQTT v0 bridge', () => {
       { topic: prefix + '/source/availability', payload: '' },
     ]);
     expect(mqtt.sent[2].topic).toBe(prefix + '/status');
+  });
+  test('the status stays connecting until every section receives PUBACK', () => {
+    const { mqtt, bridge } = setup();
+    bridge.onFrame(frame);
+    mqtt.ack(); // connecting status with a pending synchronization
+    for (let i = 0; i < 4; i++) mqtt.ack();
+    expect(JSON.parse(mqtt.retained.get(prefix + '/status')!).state).toBe('connecting');
+    expect(mqtt.queued[0].topic).toBe(prefix + '/status');
+    mqtt.ack();
+    expect(JSON.parse(mqtt.retained.get(prefix + '/status')!).state).toBe('online');
+  });
+  test('legacy tombstones are replayed after an MQTT reconnection', () => {
+    const { mqtt, bridge } = setup();
+    mqtt.retained.set(prefix + '/bridge/availability', 'old');
+    mqtt.retained.set(prefix + '/source/availability', 'old');
+    mqtt.connected = false;
+    bridge.onMqttDisconnect();
+    mqtt.connected = true;
+    bridge.onMqttConnect();
+    mqtt.settle();
+    expect(mqtt.retained.has(prefix + '/bridge/availability')).toBe(false);
+    expect(mqtt.retained.has(prefix + '/source/availability')).toBe(false);
   });
   test('heartbeat and timestamp-only updates do not republish status', () => {
     const { mqtt, bridge } = setup();

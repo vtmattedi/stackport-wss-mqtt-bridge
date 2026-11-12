@@ -8,9 +8,9 @@ In **Stackport → Projects → Add project**, select this GitHub repository and
 
 In the project's **Env** editor, create a **root `.env`** (not a secrets file in the repository). Copy keys from [`.env.example`](../.env.example) and provide the Stackport status token, instance ID, and a dedicated MQTT publisher password. For new installs, leave `SP_EXPECTED_SCOPE=all`. The image contains the public NM Root CA file; set `MQTT_CA_FILE=./certs/nm-root-ca.crt`.
 
-Deploy/recreate the project using Stackport's Compose action. Watch the `bridge` container's logs for `bridge.started`, `mqtt.connected`, `stackport.connected`, and `snapshot.synchronized`. The latter indicates all four retained sections received broker QoS1 acknowledgements; `source/availability` is then published as `online`. Without valid credentials, the service retries external connections but cannot reach healthy synchronization.
+Deploy/recreate the project using Stackport's Compose action. Watch the `bridge` container's logs for `bridge.started`, `mqtt.connected`, `stackport.connected`, and `snapshot.synchronized`. The latter indicates all four retained sections received broker QoS1 acknowledgements; `status` is then published as `online`. Without valid credentials, the service retries external connections but cannot reach healthy synchronization.
 
-From a **different, read-only** MQTT client, subscribe to `stackport/<SP_INSTANCE>/#` and check the four section topics plus bridge/source availability. Restart Stackport, bridge, and Mosquitto separately to verify truthful source/bridge availability and eventual replay of retained state. Only one bridge instance may publish to a given topic prefix.
+From a **different, read-only** MQTT client, subscribe to `stackport/<SP_INSTANCE>/#` and check the four section topics plus unified `status`; the two old availability retained messages must be absent. Restart Stackport, bridge, and Mosquitto separately to verify truthful source/bridge availability and eventual replay of retained state. Only one bridge instance may publish to a given topic prefix. Migrate consumers to `status` before replacing an old bridge. The new bridge clears old retained `bridge/availability` and `source/availability` on every MQTT connection.
 
 To check the checked-in sources locally:
 
@@ -50,7 +50,7 @@ Use the broker's existing Mosquitto Dynamic Security controls to create a dedica
 - Attach this role to only the bridge client.
 - This is the same ACL model used in Stackport-Mqtt's [provision-client.sh](https://github.com/vtmattedi/Stackport-mqtt/blob/main/scripts/provision-client.sh) and [setup-roles.sh](https://github.com/vtmattedi/Stackport-mqtt/blob/main/scripts/setup-roles.sh), but **not** the broad `nmnw` role or the privileged `dynsec-admin` role.
 - Separately provision dashboard/NMNW **read-only** subscribers if those clients need to consume `stackport/<SP_INSTANCE>/#`.
-- Check retained delivery, QoS1 acknowledgments, offline Last Will publishing, and ACL rejection of an unrelated test topic.
+- Check retained delivery, QoS1 acknowledgments, LWT offline publishing on `status`, legacy retained availability deletion, and ACL rejection of an unrelated test topic.
 
 Never put MQTT administrative tokens, the broker bootstrap password, or the private Root CA key into this bridge. Only a scoped publishing identity is required.
 
@@ -127,7 +127,7 @@ A status token is only accepted after the endpoint has been enabled. Stackport r
 3. Provision the dedicated Stackport-Mqtt publisher and narrow ACL.
 4. Validate the WebSocket handshake, MQTT TLS certificate and broker ACL on the real VPS.
 5. Start exactly one bridge instance. Wait for an initial `snapshot` and four successful retained section publishes.
-6. Subscribe from a separately authorized MQTT consumer to `stackport/<instance>/#`; confirm `bridge/availability`, `source/availability`, and the four section topics.
+6. Subscribe from a separately authorized MQTT consumer to `stackport/<instance>/#`; confirm `status` and the four section topics; verify the two old availability topics are no longer retained.
 7. Restart Stackport, the bridge, and Mosquitto separately. Confirm offline/stale status is truthful and current state is fully restored without clearing all projects.
 
 **Release gate:** don't declare v0 operational merely because CI is green; verify the real network paths and broker CA chain (ENG-66).
