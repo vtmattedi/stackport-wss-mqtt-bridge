@@ -16,8 +16,8 @@ Keep Stackport's current operational state available to MQTT clients through the
 
 ## Proposed v0 stack
 
-- **Bun + TypeScript**, using the **Bun native WebSocket client** with an Authorization header.
-- **MQTT.js** over authenticated **MQTTS / TLS on port 8883**. No separate broker, HTTP server, Socket.IO client, database, or incoming port.
+- **Bun + TypeScript**, using the **Bun native WebSocket client** with an Authorization header to `wss://sp.mattediworks.com/status/ws`.
+- **MQTT.js** over authenticated **`mqtts://mqtt.mattediworks.com:8883`**. No separate broker, HTTP server, Socket.IO client, database, or incoming port.
 - Two upstream service credentials, configured in a private `.env`: `SP_STATUS_TOKEN` (Stackport `status` scope) and `MQTT_USERNAME`/`MQTT_PASSWORD` (dedicated Mosquitto Dynamic Security client).
 - TLS verification for MQTT against [`certs/nm-root-ca.crt`](certs/nm-root-ca.crt). **Never use `rejectUnauthorized: false`.** The supplied NM Root CA is public trust material, **not** an application secret; its fingerprint is recorded in the security document.
 - MQTT QoS 1 and retained publications; broker Last Will for bridge process availability.
@@ -49,8 +49,8 @@ All JSON is UTF-8. State messages are published with `qos: 1`, `retain: true`. A
 
 1. Enable **Settings → Live status** in Stackport and create a **status-only** token (not a session or MCP read/write token).
 2. Provision a dedicated **publish-only** client in Stackport-Mqtt's Dynamic Security ACL for `stackport/<instance>/#`. No `mqtt-admin` or broad `nmnw` role.
-3. Choose a network path satisfying Stackport's security rule: **direct unproxied host-loopback `ws://127.0.0.1:3000/status/ws`**, or a properly verified **`wss://`** route. Cleartext cross-container `ws://stackport:3000` will be rejected.
-4. Broker may be reached on localhost or over an internal Docker network, but its TLS server certificate must still verify against `mqtt.mattediworks.com` (use TLS `servername` when connecting to an IP).
-5. Existing [Linear ENG-65](https://linear.app/mattediworks/issue/ENG-65/p1-reconcile-scoped-live-status-sections-when-a-project-changes-groups) and [ENG-66](https://linear.app/mattediworks/issue/ENG-66/p1-validate-secure-internal-route-for-stackport-live-ws-mqtt-bridge) track scoped stream correctness and secure deployment topology.
+3. **v0 uses the external `wss://sp.mattediworks.com/status/ws` only**, with normal public TLS certificate validation. Never use cleartext `ws://stackport:3000`, relax Stackport's transport checks, or depend on host networking for v0.
+4. **v0 uses external `mqtts://mqtt.mattediworks.com:8883`**, validating the broker certificate against the committed NM Root CA and the hostname `mqtt.mattediworks.com`.
+5. v0 needs outbound DNS and TLS connectivity to the public endpoints, but exposes **no inbound ports**. Existing [Linear ENG-65](https://linear.app/mattediworks/issue/ENG-65/p1-reconcile-scoped-live-status-sections-when-a-project-changes-groups) and [ENG-66](https://linear.app/mattediworks/issue/ENG-66/p1-validate-secure-internal-route-for-stackport-live-ws-mqtt-bridge) track scoped stream correctness and secure deployment topology.
 
 **Out of scope for v0:** per-project topics, event history/replay, remote control, MQTT subscriptions, per-user configuration, UI, and general-purpose notification dispatch.
