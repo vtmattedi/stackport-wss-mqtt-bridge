@@ -15,7 +15,8 @@ class FakeMqtt implements PublishClient {
   ack(): void {
     const next = this.queued.shift();
     if (!next) throw new Error('nothing pending');
-    this.retained.set(next.topic, next.payload);
+    if (next.payload === '') this.retained.delete(next.topic);
+    else this.retained.set(next.topic, next.payload);
     next.callback();
   }
   settle(max = 40): void {
@@ -37,6 +38,8 @@ const snapshot: Snapshot = {
 const frame = { type: 'snapshot' as const, at: time, data: snapshot };
 function setup() {
   const mqtt = new FakeMqtt();
+  mqtt.retained.set(prefix + '/bridge/availability', '{"state":"online"}');
+  mqtt.retained.set(prefix + '/source/availability', '{"state":"online"}');
   const bridge = new Bridge({ topicBase: prefix }, mqtt);
   bridge.onMqttConnect();
   mqtt.settle();
@@ -46,15 +49,69 @@ describe('retained MQTT v0 bridge', () => {
   test('publishes full snapshot, stable project IDs, then source online only after PUBACKs', () => {
     const { mqtt, bridge } = setup();
     bridge.onFrame(frame);
-    expect(mqtt.queued[0].topic).toBe(prefix + '/source/availability');
+    expect(mqtt.queued[0].topic).toBe(prefix + '/status');
     mqtt.settle();
     expect(JSON.parse(mqtt.retained.get(prefix + '/state/projects')!)[0].id).toBe(7);
     expect(mqtt.retained.get(prefix + '/state/alerts')).toBe('[]');
-    const state = JSON.parse(mqtt.retained.get(prefix + '/source/availability')!);
+    const state = JSON.parse(mqtt.retained.get(prefix + '/status')!);
     expect(state.state).toBe('online');
     const stateWrites = mqtt.sent.filter(s => s.topic.startsWith(prefix + '/state/'));
     expect(stateWrites).toHaveLength(4);
-    expect(mqtt.sent.at(-1)!.topic).toBe(prefix + '/source/availability');
+    expect(mqtt.sent.at(-1)!.topic).toBe(prefix + '/status');
+    expect(mqtt.retained.has(prefix + '/bridge/availability')).toBe(false);
+    expect(mqtt.retained.has(prefix + '/source/availability')).toBe(false);
+  });
+  test('legacy availability is cleared before unified status is published', () => {
+    const { mqtt } = setup();
+    expect(mqtt.sent.slice(0, 2)).toEqual([
+      { topic: prefix + '/bridge/availability', payload: '' },
+      { topic: prefix + '/source/availability', payload: '' },
+    ]);
+    expect(mqtt.sent[2].topic).toBe(prefix + '/status');
+  });
+  test('the status stays connecting until every section receives PUBACK', () => {
+    const { mqtt, bridge } = setup();
+    bridge.onFrame(frame);
+    mqtt.ack(); // connecting status with a pending synchronization
+    for (let i = 0; i < 4; i++) mqtt.ack();
+    expect(JSON.parse(mqtt.retained.get(prefix + '/status')!).state).toBe('connecting');
+    expect(mqtt.queued[0].topic).toBe(prefix + '/status');
+    mqtt.ack();
+    expect(JSON.parse(mqtt.retained.get(prefix + '/status')!).state).toBe('online');
+  });
+  test('legacy tombstones are replayed after an MQTT reconnection', () => {
+    const { mqtt, bridge } = setup();
+    mqtt.retained.set(prefix + '/bridge/availability', 'old');
+    mqtt.retained.set(prefix + '/source/availability', 'old');
+    mqtt.connected = false;
+    bridge.onMqttDisconnect();
+    mqtt.connected = true;
+    bridge.onMqttConnect();
+    mqtt.settle();
+    expect(mqtt.retained.has(prefix + '/bridge/availability')).toBe(false);
+    expect(mqtt.retained.has(prefix + '/source/availability')).toBe(false);
+  });
+  test('heartbeat and timestamp-only updates do not republish status', () => {
+    const { mqtt, bridge } = setup();
+    bridge.onFrame(frame);
+    mqtt.settle();
+    const count = mqtt.sent.length;
+    bridge.onFrame({ type: 'heartbeat', at: '2026-11-12T00:00:30.000Z', dataAgeS: 1 });
+    bridge.onFrame({ type: 'update', at: '2026-11-12T00:00:35.000Z', section: 'projects', data: snapshot.projects });
+    mqtt.settle();
+    expect(mqtt.sent).toHaveLength(count);
+  });
+  test('stale status retains last-known project state and recovers', () => {
+    const { mqtt, bridge } = setup();
+    bridge.onFrame(frame);
+    mqtt.settle();
+    bridge.setSourceStale();
+    mqtt.settle();
+    expect(JSON.parse(mqtt.retained.get(prefix + '/status')!)).toMatchObject({ state: 'stale', reason: 'stale_data' });
+    expect(JSON.parse(mqtt.retained.get(prefix + '/state/projects')!)[0].state).toBe('ready');
+    bridge.setSourceHealthy();
+    mqtt.settle();
+    expect(JSON.parse(mqtt.retained.get(prefix + '/status')!).state).toBe('online');
   });
   test('only changed section republished; empty array removes resolved actions', () => {
     const { mqtt, bridge } = setup();
@@ -75,7 +132,7 @@ describe('retained MQTT v0 bridge', () => {
     mqtt.settle();
     bridge.setSourceOffline('socket_closed');
     mqtt.settle();
-    expect(JSON.parse(mqtt.retained.get(prefix + '/source/availability')!).state).toBe('offline');
+    expect(JSON.parse(mqtt.retained.get(prefix + '/status')!).state).toBe('offline');
     expect(JSON.parse(mqtt.retained.get(prefix + '/state/projects')!)[0].state).toBe('ready');
   });
   test('broker reconnect replays latest sections but not every intermediate update', () => {
@@ -122,6 +179,6 @@ describe('retained MQTT v0 bridge', () => {
     bridge.onMqttConnect();
     staleCallback();
     mqtt.settle();
-    expect(JSON.parse(mqtt.retained.get(prefix + '/source/availability')!).state).toBe('online');
+    expect(JSON.parse(mqtt.retained.get(prefix + '/status')!).state).toBe('online');
   });
 });

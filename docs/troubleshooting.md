@@ -42,3 +42,13 @@ you'll instead see `stackport.hello_accepted` before any snapshot.
 **If the error is still not identified, provide only the new error code and
 phase.** There is no need to paste tokens, raw websocket frames, the private
 `.env`, or MQTT credentials into an issue.
+
+## Unified MQTT status migration
+
+The bridge publishes `stackport/<SP_INSTANCE>/status` instead of separate
+`bridge/availability` and `source/availability` topics. On each connection,
+it first publishes zero-byte QoS 1 retained messages to delete both legacy values.
+Keep publish ACL permission for the full `stackport/<SP_INSTANCE>/#` prefix.
+If `status` never appears, check MQTT publish ACLs and PUBACKs for those deletions:
+the ordered publisher waits for cleanup to complete. Subscribe to the new status
+topic before upgrading, and do not run old/new writers for the same instance.
