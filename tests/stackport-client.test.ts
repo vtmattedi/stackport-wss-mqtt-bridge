@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import type { Config } from '../src/config';
 import { Bridge, type PublishClient } from '../src/bridge';
 import { StackportClient } from '../src/stackport';
