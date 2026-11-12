@@ -136,7 +136,10 @@ export class Bridge {
         }
       }
     }
-    if (this.fresh && this.allSectionsAcknowledged()) this.fullSync = false;
+    if (this.fresh && this.fullSync && this.allSectionsAcknowledged()) {
+      this.fullSync = false;
+      log('snapshot.synchronized');
+    }
     const actualPayload = this.sourceMessage(this.state);
     if (this.acknowledged.get(sourceTopic) !== actualPayload) {
       return { topic: sourceTopic, payload: actualPayload };
