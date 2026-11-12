@@ -130,7 +130,7 @@ Only the bridge may write this namespace. A separate read-only role for subscrib
 - `SP_STATUS_TOKEN` has **status-only** scope and no MCP read/write access. V0 expects **all** scope; group-scoped operation is deferred pending [ENG-65](https://linear.app/mattediworks/issue/ENG-65/p1-reconcile-scoped-live-status-sections-when-a-project-changes-groups).
 - `MQTT_USERNAME`/`MQTT_PASSWORD` belong to a dedicated Mosquitto Dynamic Security client with **publishClientSend only** on `stackport/<instance>/#`. Not `mqtt-admin`, not `nmnw`, no `$CONTROL`, no subscribe access.
 - Keep credentials only in an untracked private `.env` or host secret store. The NM public CA is committed; **never commit a private CA key, broker key, or client credential**.
-- MQTT is always authenticated `mqtts` on 8883, with CA and hostname verification. `MQTT_TLS_SERVERNAME=mqtt.mattediworks.com` is required if connecting to the broker by `127.0.0.1` or Docker service name.
+- MQTT is always authenticated `mqtts` on 8883, with CA and hostname verification. `MQTT_TLS_SERVERNAME=mqtt.mattediworks.com` is fixed for the external v0 endpoint; it must match the broker certificate SAN.
 - No inbound ports, no Docker socket, no root privileges, no privileged container, no shell/deploy privileges.
 - Sanitize logs: never print tokens, passwords, full connection URL userinfo, provider payload, or raw WebSocket errors that may contain headers. Structured telemetry: connection state, last source frame, source age, publish success/failure counts, retry backoff.
 - Maximum inbound frame size / JSON depth and outgoing MQTT payload size must be bounded with explicit caps. Failure to parse closes/reconnects instead of publishing corrupt state.
