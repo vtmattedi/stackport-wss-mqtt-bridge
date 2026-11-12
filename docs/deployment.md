@@ -33,38 +33,26 @@ Use the broker's existing Mosquitto Dynamic Security controls to create a dedica
 
 Never put MQTT administrative tokens, the broker bootstrap password, or the private Root CA key into this bridge. Only a scoped publishing identity is required.
 
-## Recommended v0 network path: host-local process
+## Required v0 deployment route: externally secured WSS and MQTTS
 
-A standalone **unprivileged systemd service on the VPS host** is simplest for two local endpoints while preserving Stackport's intentional isolation from managed-project Docker networks:
+The bridge is an **ordinary standalone Stackport-managed Docker project** with outbound connections only. V0 deliberately uses the two public HTTPS/TLS names, even if the broker and Stackport are on the same VPS:
 
 ```text
-Host-side bridge process (no listener)
-   ├── ws://127.0.0.1:3000/status/ws       (Stackport HTTP port, direct host loopback)
-   └── mqtts://127.0.0.1:8883               (Stackport's existing TCP exposure)
-                           TLS SNI: mqtt.mattediworks.com
-                           CA: certs/nm-root-ca.crt
+Bridge container (no listening ports, no Docker socket)
+  ├── wss://sp.mattediworks.com/status/ws
+  │     TLS: normal publicly trusted Stackport certificate
+  │     Auth: Authorization: Bearer <status-only SP token>
+  │
+  └── mqtts://mqtt.mattediworks.com:8883
+        TLS: NM Root CA + verify mqtt.mattediworks.com
+        Auth: dedicated publish-only Mosquitto user
 ```
 
-- Stackport's live stream explicitly permits **unproxied same-host loopback**; it **does not** permit ordinary cleartext traffic from a separate Docker container.
-- The broker's public TCP exposure must actually accept localhost connections on the VPS. Check before relying on it; if it does not, select one of the alternatives below.
-- `MQTT_URL=mqtts://127.0.0.1:8883` is merely the **TCP destination**. Set `MQTT_TLS_SERVERNAME=mqtt.mattediworks.com` and validate the certificate hostname against that domain; otherwise the cert's SAN will not match `127.0.0.1`.
-- This path **requires no external Internet traffic** after services and packages are provisioned. It does **not automatically firewall Internet egress**; enforce that separately if required.
-- Run as a dedicated non-root user with read access only to the private `.env` and public CA, no Docker group membership, and no inbound TCP ports. Keep logs local and secret-free.
-- Let systemd restart on failure with backoff. The bridge itself handles temporary disconnections.
+**Network requirements:** outbound DNS, TCP 443 to `sp.mattediworks.com`, TCP 8883 to `mqtt.mattediworks.com`. Do not add `ports:`, public domains, TCP exposures, host networking, or a privileged attachment to Stackport's management network. Validate the actual host/Docker DNS and public endpoint hairpin route during integration testing.
 
-**Do not call `ws://stackport:3000/status/ws` from an ordinary project container**: even if a route exists, Stackport's transport check denies a non-loopback cleartext WebSocket.
+**This v0 does use external TLS endpoints.** It does *not* assume Internet-free operation, direct host-loopback access, or an internal plaintext Docker route. The internal-only design remains a possible later optimization tracked in [ENG-66](https://linear.app/mattediworks/issue/ENG-66/p1-validate-secure-internal-route-for-stackport-live-ws-mqtt-bridge). Ordinary `ws://stackport:3000/status/ws` from another container is rejected by Stackport's current transport policy; do not weaken that check.
 
-### Deployment alternatives
-
-| Mode | Stackport transport | MQTT transport | Tradeoff |
-| --- | --- | --- | --- |
-| **Host-side Bun + systemd (v0 preferred)** | `ws://127.0.0.1:3000/status/ws` | `mqtts://127.0.0.1:8883` with CA+SNI | Both endpoints local, no Docker network coupling |
-| Dedicated **host-network** container | Same host-loopback path | Same TLS local TCP proxy | Simple packaging; shares host network namespace and must not gain Docker socket / privileges |
-| Ordinary managed container | `wss://<Stackport HTTPS domain>/status/ws` | Internal broker network `mqtt:8883` or external MQTTS endpoint | Stronger container isolation; requires a carefully verified SSL, DNS, and Docker network route |
-
-For a managed container, keep its inbound ports closed, use only a narrowly attached broker network, and rely on the authenticated WSS endpoint. Do not attach the Stackport management container to broad managed-project networks simply to make the bridge connect.
-
-The internal route remains subject to [ENG-66](https://linear.app/mattediworks/issue/ENG-66/p1-validate-secure-internal-route-for-stackport-live-ws-mqtt-bridge) integration verification. **No deployment topology is claimed tested yet.**
+Containers should run non-root, without Docker socket access or inbound ports; use a read-only filesystem, `no-new-privileges` and dropped capabilities as compatible with the chosen image. A single stable bridge instance writes the topic prefix, with `restart: unless-stopped` after implementation.
 
 ## Private environment
 
@@ -73,22 +61,22 @@ Copy [`.env.example`](../.env.example) to `.env` and fill secret fields. Do not 
 ```dotenv
 SP_INSTANCE=sp-replace-with-settings-instance
 SP_EXPECTED_SCOPE=all
-SP_WS_URL=ws://127.0.0.1:3000/status/ws
+SP_WS_URL=wss://sp.mattediworks.com/status/ws
 SP_STATUS_TOKEN=spk_<status-only-secret>
 
-MQTT_URL=mqtts://127.0.0.1:8883
+MQTT_URL=mqtts://mqtt.mattediworks.com:8883
 MQTT_TLS_SERVERNAME=mqtt.mattediworks.com
 MQTT_CA_FILE=./certs/nm-root-ca.crt
-MQTT_CLIENT_ID=stackport-bridge-one
+MQTT_CLIENT_ID=stackport-bridge-primary
 MQTT_USERNAME=stackport-bridge
 MQTT_PASSWORD=<dedicated-broker-password>
 ```
 
-Host-side service paths must resolve `MQTT_CA_FILE` relative to the project root (or use an absolute path). Treat the root CA as public, but protect its integrity; don't silently replace it based on data from a server.
+Inside the container, resolve `MQTT_CA_FILE` relative to its working directory (or use an absolute path). The root CA is public but must retain integrity; never auto-replace it with a certificate supplied by the server.
 
 ### Validate the broker trust chain
 
-From the VPS, once the TCP exposure is live:
+From the bridge runtime/network, once the TCP exposure is live:
 
 ```bash
 openssl s_client -brief -connect 127.0.0.1:8883 \
@@ -107,7 +95,7 @@ The supplied root is self-signed and was parsed/verified locally:
 
 ### Verify the Stackport stream
 
-Use a non-browser WebSocket client capable of setting a custom `Authorization` header. Check the `hello` frame and fresh `snapshot`, and verify that a direct cleartext connection from a remote container is refused.
+Use a non-browser WebSocket client capable of setting a custom `Authorization` header to **`wss://sp.mattediworks.com/status/ws`**. Check the `hello` frame (`v=1`, expected `instance`, `scope=all`) and the fresh `snapshot`. Verify the normal public HTTPS certificate chain; never disable WSS TLS verification.
 
 A status token is only accepted after the endpoint has been enabled. Stackport returns 404 while it is disabled.
 
