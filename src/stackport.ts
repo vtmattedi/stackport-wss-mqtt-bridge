@@ -1,5 +1,5 @@
 import type { Config } from './config';
-import { StatusProtocol } from './protocol';
+import { ProtocolError, StatusProtocol, type WireEvent } from './protocol';
 import { Bridge } from './bridge';
 import { log } from './log';
 
@@ -52,10 +52,23 @@ export class StackportClient {
     });
     ws.addEventListener('message', event => {
       if (generation !== this.generation || this.stopped) return;
+      let frame: WireEvent;
       try {
-        if (typeof event.data !== 'string') throw new Error('bad_protocol');
-        const frame = parser.accept(event.data);
+        if (typeof event.data !== 'string') throw new ProtocolError('unexpected_frame_type');
+        frame = parser.accept(event.data);
+      } catch (error) {
+        // Do not log the raw frame, unknown fields, identifiers, or errors
+        // provided by the server. Only known fixed diagnostic codes.
+        const code = error instanceof ProtocolError ? error.code : 'unexpected_error';
+        log('stackport.protocol_rejected', { phase: parser.phase, code });
+        this.fail(generation, 'bad_protocol');
+        return;
+      }
+      try {
         this.lastFrameMs = Date.now();
+        if (frame.type === 'hello') {
+          log('stackport.hello_accepted');
+        }
         if (frame.type === 'snapshot') {
           this.live = true;
           this.attempt = 0;
@@ -73,6 +86,7 @@ export class StackportClient {
         this.bridge.onFrame(frame);
         this.checkLiveness();
       } catch {
+        log('stackport.message_processing_failed', { phase: parser.phase });
         this.fail(generation, 'bad_protocol');
       }
     });
