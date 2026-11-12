@@ -46,7 +46,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const mqttUrl = required(env, 'MQTT_URL');
   const mqtt = new URL(mqttUrl);
   if (mqtt.protocol !== 'mqtts:' || (mqtt.port && mqtt.port !== '8883') ||
-      mqtt.pathname !== '/' || mqtt.search || mqtt.hash || mqtt.username || mqtt.password) {
+      (mqtt.pathname !== '' && mqtt.pathname !== '/') || mqtt.search || mqtt.hash || mqtt.username || mqtt.password) {
     throw new Error('MQTT_URL must be an MQTTS endpoint without embedded credentials');
   }
   const mqttServername = required(env, 'MQTT_TLS_SERVERNAME');
